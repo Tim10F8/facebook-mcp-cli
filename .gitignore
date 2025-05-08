@@ -1,0 +1,11 @@
+# Secrets
+.env
+
+# Python (legacy)
+.venv/
+__pycache__/
+
+# Node / Bun
+node_modules/
+bun.lockb
+bun.lock

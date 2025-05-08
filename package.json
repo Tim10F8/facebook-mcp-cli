@@ -1,0 +1,17 @@
+{
+  "name": "facebook-mcp-cli",
+  "version": "2.0.0",
+  "description": "Facebook Page Management MCP server & CLI tools",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "cli": "bun run cli/fbcli.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

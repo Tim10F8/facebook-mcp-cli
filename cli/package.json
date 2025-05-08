@@ -1,0 +1,17 @@
+{
+  "name": "fbcli",
+  "version": "1.0.0",
+  "description": "Facebook Page Management CLI — shell interface to the Graph API",
+  "type": "module",
+  "bin": {
+    "fb": "fbcli.ts",
+    "facebook": "fbcli.ts"
+  },
+  "scripts": {
+    "start": "bun run fbcli.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
