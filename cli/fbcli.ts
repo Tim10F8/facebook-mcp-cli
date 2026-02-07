@@ -13,6 +13,18 @@ const GRAPH_API_BASE = "https://graph.facebook.com/v22.0";
 const SCRIPT_DIR = dirname(Bun.main);
 const ENV_PATH = join(SCRIPT_DIR, ".env");
 
+// --- Debug logging (stderr, only when DEBUG=1) ---
+
+const DEBUG = !!process.env.DEBUG;
+
+function debug(label: string, ...args: unknown[]) {
+  if (DEBUG) console.error(`[fbcli:${label}]`, ...args);
+}
+
+function isError(res: unknown): boolean {
+  return typeof res === "object" && res !== null && "error" in res;
+}
+
 // --- Config ---
 
 interface PageAsset {
@@ -79,6 +91,7 @@ async function graphApi(
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(body);
   }
+  debug("graph", method, endpoint);
   const res = await fetch(url.toString(), opts);
   return res.json();
 }
@@ -161,6 +174,7 @@ async function ruploadApi(
   };
   const opts: RequestInit = { method: "POST", headers: hdrs };
   if (body) opts.body = body;
+  debug("rupload", endpoint);
   const res = await fetch(url, opts);
   return res.json();
 }
@@ -172,13 +186,17 @@ async function resumableUpload(
   fileName: string,
   fileSize: number,
   fileType: string,
-): Promise<string> {
+): Promise<any> {
+  debug("upload:init", appId, fileName, fileSize);
   const initRes = (await graphApi("POST", `${appId}/uploads`, userToken, {
     file_name: fileName,
     file_length: String(fileSize),
     file_type: fileType,
   })) as Record<string, any>;
+  if (isError(initRes)) return initRes;
   const sessionId = initRes.id;
+
+  debug("upload:transfer", sessionId);
   const uploadUrl = `${GRAPH_API_BASE}/${sessionId}`;
   const res = await fetch(uploadUrl, {
     method: "POST",
@@ -199,6 +217,7 @@ function isUrl(str: string): boolean {
 
 async function readLocalFile(path: string): Promise<{ data: Uint8Array; size: number; name: string }> {
   const file = Bun.file(path);
+  if (!(await file.exists())) die(`File not found: ${path}`);
   const data = new Uint8Array(await file.arrayBuffer());
   const name = path.split("/").pop() ?? "video.mp4";
   return { data, size: data.length, name };
@@ -484,23 +503,29 @@ async function cmdDm(page: PageAsset, userId: string, message: string) {
 async function cmdPublishReel(page: PageAsset, source: string, description?: string, title?: string) {
   const token = page.page_access_token;
   // Step 1: Init
+  debug("reel", "init", page.fb_page_id);
   const init = (await graphApi("POST", `${page.fb_page_id}/video_reels`, token, {
     upload_phase: "start",
   })) as Record<string, any>;
+  if (isError(init)) { out({ step: "init", ...init }); return; }
   const videoId = init.video_id;
 
   // Step 2: Upload
+  debug("reel", "upload", videoId);
+  let upload: unknown;
   if (isUrl(source)) {
-    await ruploadApi(videoId, token, { file_url: source });
+    upload = await ruploadApi(videoId, token, { file_url: source });
   } else {
     const { data, size } = await readLocalFile(source);
-    await ruploadApi(videoId, token, {
+    upload = await ruploadApi(videoId, token, {
       offset: "0",
       file_size: String(size),
     }, data);
   }
+  if (isError(upload)) { out({ step: "upload", video_id: videoId, ...(upload as object) }); return; }
 
   // Step 3: Publish
+  debug("reel", "publish", videoId);
   const finishParams: Record<string, string> = {
     upload_phase: "finish",
     video_id: videoId,
@@ -508,7 +533,9 @@ async function cmdPublishReel(page: PageAsset, source: string, description?: str
   };
   if (description) finishParams.description = description;
   if (title) finishParams.title = title;
-  out(await graphApi("POST", `${page.fb_page_id}/video_reels`, token, finishParams));
+  const result = await graphApi("POST", `${page.fb_page_id}/video_reels`, token, finishParams);
+  if (isError(result)) { out({ step: "publish", video_id: videoId, ...(result as object) }); return; }
+  out(result);
 }
 
 async function cmdReels(page: PageAsset) {
@@ -521,36 +548,51 @@ async function cmdVideoStatus(page: PageAsset, videoId: string) {
 
 async function cmdVideoStory(page: PageAsset, source: string) {
   const token = page.page_access_token;
+  debug("video-story", "init", page.fb_page_id);
   const init = (await graphApi("POST", `${page.fb_page_id}/video_stories`, token, {
     upload_phase: "start",
   })) as Record<string, any>;
+  if (isError(init)) { out({ step: "init", ...init }); return; }
   const videoId = init.video_id;
 
+  debug("video-story", "upload", videoId);
+  let upload: unknown;
   if (isUrl(source)) {
-    await ruploadApi(videoId, token, { file_url: source });
+    upload = await ruploadApi(videoId, token, { file_url: source });
   } else {
     const { data, size } = await readLocalFile(source);
-    await ruploadApi(videoId, token, {
+    upload = await ruploadApi(videoId, token, {
       offset: "0",
       file_size: String(size),
     }, data);
   }
+  if (isError(upload)) { out({ step: "upload", video_id: videoId, ...(upload as object) }); return; }
 
-  out(await graphApi("POST", `${page.fb_page_id}/video_stories`, token, {
+  debug("video-story", "publish", videoId);
+  const result = await graphApi("POST", `${page.fb_page_id}/video_stories`, token, {
     upload_phase: "finish",
     video_id: videoId,
-  }));
+  });
+  if (isError(result)) { out({ step: "publish", video_id: videoId, ...(result as object) }); return; }
+  out(result);
 }
 
 async function cmdPhotoStory(page: PageAsset, photoUrl: string) {
   const token = page.page_access_token;
+  debug("photo-story", "upload", page.fb_page_id);
   const upload = (await graphApi("POST", `${page.fb_page_id}/photos`, token, {
     url: photoUrl,
     published: "false",
   })) as Record<string, any>;
-  out(await graphApi("POST", `${page.fb_page_id}/photo_stories`, token, {
-    photo_id: upload.id,
-  }));
+  if (isError(upload)) { out({ step: "upload", ...upload }); return; }
+  const photoId = upload.id;
+
+  debug("photo-story", "publish", photoId);
+  const result = await graphApi("POST", `${page.fb_page_id}/photo_stories`, token, {
+    photo_id: photoId,
+  });
+  if (isError(result)) { out({ step: "publish", photo_id: photoId, ...(result as object) }); return; }
+  out(result);
 }
 
 async function cmdStories(page: PageAsset) {

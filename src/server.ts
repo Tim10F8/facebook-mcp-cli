@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadAssets, loadAppConfig, type PageAsset } from "./config.js";
-import { graphApi, graphApiBatch, ruploadApi } from "./api.js";
+import { graphApi, graphApiBatch, ruploadApi, debug, isError } from "./api.js";
 
 // --- Page registry ---
 
@@ -538,11 +538,18 @@ server.tool(
   },
   async ({ page_name, video_url, description, title }) => {
     const p = getPage(page_name);
+    debug("reel", "init", p.fb_page_id);
     const start = await graphApi("POST", `${p.fb_page_id}/video_reels`, p.page_access_token, {
       upload_phase: "start",
     });
+    if (isError(start)) return json({ step: "init", ...start });
     const videoId = start.video_id;
-    await ruploadApi(videoId, p.page_access_token, { file_url: video_url });
+
+    debug("reel", "upload", videoId);
+    const upload = await ruploadApi(videoId, p.page_access_token, { file_url: video_url });
+    if (isError(upload)) return json({ step: "upload", video_id: videoId, ...upload });
+
+    debug("reel", "publish", videoId);
     const finishParams: Record<string, string> = {
       upload_phase: "finish",
       video_id: videoId,
@@ -550,9 +557,9 @@ server.tool(
     };
     if (description) finishParams.description = description;
     if (title) finishParams.title = title;
-    return json(
-      await graphApi("POST", `${p.fb_page_id}/video_reels`, p.page_access_token, finishParams),
-    );
+    const result = await graphApi("POST", `${p.fb_page_id}/video_reels`, p.page_access_token, finishParams);
+    if (isError(result)) return json({ step: "publish", video_id: videoId, ...result });
+    return json(result);
   },
 );
 
@@ -586,17 +593,24 @@ server.tool(
   { page_name: z.string(), video_url: z.string() },
   async ({ page_name, video_url }) => {
     const p = getPage(page_name);
+    debug("video-story", "init", p.fb_page_id);
     const start = await graphApi("POST", `${p.fb_page_id}/video_stories`, p.page_access_token, {
       upload_phase: "start",
     });
+    if (isError(start)) return json({ step: "init", ...start });
     const videoId = start.video_id;
-    await ruploadApi(videoId, p.page_access_token, { file_url: video_url });
-    return json(
-      await graphApi("POST", `${p.fb_page_id}/video_stories`, p.page_access_token, {
-        upload_phase: "finish",
-        video_id: videoId,
-      }),
-    );
+
+    debug("video-story", "upload", videoId);
+    const upload = await ruploadApi(videoId, p.page_access_token, { file_url: video_url });
+    if (isError(upload)) return json({ step: "upload", video_id: videoId, ...upload });
+
+    debug("video-story", "publish", videoId);
+    const result = await graphApi("POST", `${p.fb_page_id}/video_stories`, p.page_access_token, {
+      upload_phase: "finish",
+      video_id: videoId,
+    });
+    if (isError(result)) return json({ step: "publish", video_id: videoId, ...result });
+    return json(result);
   },
 );
 
@@ -606,16 +620,20 @@ server.tool(
   { page_name: z.string(), photo_url: z.string() },
   async ({ page_name, photo_url }) => {
     const p = getPage(page_name);
+    debug("photo-story", "upload", p.fb_page_id);
     const uploaded = await graphApi("POST", `${p.fb_page_id}/photos`, p.page_access_token, {
       url: photo_url,
       published: "false",
     });
+    if (isError(uploaded)) return json({ step: "upload", ...uploaded });
     const photoId = uploaded.id;
-    return json(
-      await graphApi("POST", `${p.fb_page_id}/photo_stories`, p.page_access_token, {
-        photo_id: photoId,
-      }),
-    );
+
+    debug("photo-story", "publish", photoId);
+    const result = await graphApi("POST", `${p.fb_page_id}/photo_stories`, p.page_access_token, {
+      photo_id: photoId,
+    });
+    if (isError(result)) return json({ step: "publish", photo_id: photoId, ...result });
+    return json(result);
   },
 );
 

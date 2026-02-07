@@ -5,6 +5,18 @@
 
 import { GRAPH_API_BASE, GRAPH_API_VERSION } from "./config.js";
 
+// --- Debug logging (stderr, only when DEBUG=1) ---
+
+const DEBUG = !!process.env.DEBUG;
+
+export function debug(label: string, ...args: unknown[]) {
+  if (DEBUG) console.error(`[fb:${label}]`, ...args);
+}
+
+export function isError(res: any): boolean {
+  return res?.error !== undefined;
+}
+
 export async function graphApi(
   method: string,
   endpoint: string,
@@ -24,6 +36,7 @@ export async function graphApi(
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(body);
   }
+  debug("graph", method, endpoint);
   const res = await fetch(url.toString(), opts);
   return res.json();
 }
@@ -116,6 +129,7 @@ export async function ruploadApi(
   if (body) {
     opts.body = body;
   }
+  debug("rupload", endpoint);
   const res = await fetch(url, opts);
   return res.json();
 }
@@ -134,16 +148,19 @@ export async function resumableUpload(
   fileName: string,
   fileSize: number,
   fileType: string,
-): Promise<string> {
+): Promise<any> {
   // Step 1: Init upload session
+  debug("upload:init", appId, fileName, fileSize);
   const initRes = await graphApi("POST", `${appId}/uploads`, userToken, {
     file_name: fileName,
     file_length: String(fileSize),
     file_type: fileType,
   });
+  if (isError(initRes)) return initRes;
   const sessionId = initRes.id; // format: "upload:XXXX"
 
   // Step 2: Transfer binary
+  debug("upload:transfer", sessionId);
   const uploadUrl = `${GRAPH_API_BASE}/${sessionId}`;
   const res = await fetch(uploadUrl, {
     method: "POST",
