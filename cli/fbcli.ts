@@ -8,7 +8,7 @@
 import { readFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 
-const VERSION = "1.2.0";
+const VERSION = "2.0.0";
 const GRAPH_API_BASE = "https://graph.facebook.com/v22.0";
 const SCRIPT_DIR = dirname(Bun.main);
 const ENV_PATH = join(SCRIPT_DIR, ".env");
@@ -36,6 +36,17 @@ function loadAssets(): PageAsset[] {
   } catch {
     die("FACEBOOK_ASSETS is not valid JSON");
   }
+}
+
+function loadAppConfig(): { appId?: string; userToken?: string } {
+  if (!existsSync(ENV_PATH)) return {};
+  const text = readFileSync(ENV_PATH, "utf-8");
+  const appMatch = text.match(/^FB_APP_ID\s*=\s*['"]?([^'"\n]+)['"]?$/m);
+  const tokenMatch = text.match(/^FB_USER_ACCESS_TOKEN\s*=\s*['"]?([^'"\n]+)['"]?$/m);
+  return {
+    appId: appMatch?.[1],
+    userToken: tokenMatch?.[1],
+  };
 }
 
 function getPage(assets: PageAsset[], name: string): PageAsset {
@@ -130,6 +141,67 @@ async function graphApiBatch(
     }
   }
   return results;
+}
+
+// --- Rupload / File Helpers ---
+
+const GRAPH_API_VERSION = "v22.0";
+const RUPLOAD_BASE = `https://rupload.facebook.com/video-upload/${GRAPH_API_VERSION}`;
+
+async function ruploadApi(
+  endpoint: string,
+  token: string,
+  headers?: Record<string, string>,
+  body?: Uint8Array,
+): Promise<unknown> {
+  const url = endpoint.startsWith("http") ? endpoint : `${RUPLOAD_BASE}/${endpoint}`;
+  const hdrs: Record<string, string> = {
+    Authorization: `OAuth ${token}`,
+    ...headers,
+  };
+  const opts: RequestInit = { method: "POST", headers: hdrs };
+  if (body) opts.body = body;
+  const res = await fetch(url, opts);
+  return res.json();
+}
+
+async function resumableUpload(
+  appId: string,
+  userToken: string,
+  fileData: Uint8Array,
+  fileName: string,
+  fileSize: number,
+  fileType: string,
+): Promise<string> {
+  const initRes = (await graphApi("POST", `${appId}/uploads`, userToken, {
+    file_name: fileName,
+    file_length: String(fileSize),
+    file_type: fileType,
+  })) as Record<string, any>;
+  const sessionId = initRes.id;
+  const uploadUrl = `${GRAPH_API_BASE}/${sessionId}`;
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${userToken}`,
+      file_offset: "0",
+      "Content-Type": "application/octet-stream",
+    },
+    body: fileData,
+  });
+  const result = (await res.json()) as Record<string, any>;
+  return result.h;
+}
+
+function isUrl(str: string): boolean {
+  return str.startsWith("http://") || str.startsWith("https://");
+}
+
+async function readLocalFile(path: string): Promise<{ data: Uint8Array; size: number; name: string }> {
+  const file = Bun.file(path);
+  const data = new Uint8Array(await file.arrayBuffer());
+  const name = path.split("/").pop() ?? "video.mp4";
+  return { data, size: data.length, name };
 }
 
 // --- Helpers ---
@@ -407,6 +479,181 @@ async function cmdDm(page: PageAsset, userId: string, message: string) {
   );
 }
 
+// --- Video Commands ---
+
+async function cmdPublishReel(page: PageAsset, source: string, description?: string, title?: string) {
+  const token = page.page_access_token;
+  // Step 1: Init
+  const init = (await graphApi("POST", `${page.fb_page_id}/video_reels`, token, {
+    upload_phase: "start",
+  })) as Record<string, any>;
+  const videoId = init.video_id;
+
+  // Step 2: Upload
+  if (isUrl(source)) {
+    await ruploadApi(videoId, token, { file_url: source });
+  } else {
+    const { data, size } = await readLocalFile(source);
+    await ruploadApi(videoId, token, {
+      offset: "0",
+      file_size: String(size),
+    }, data);
+  }
+
+  // Step 3: Publish
+  const finishParams: Record<string, string> = {
+    upload_phase: "finish",
+    video_id: videoId,
+    video_state: "PUBLISHED",
+  };
+  if (description) finishParams.description = description;
+  if (title) finishParams.title = title;
+  out(await graphApi("POST", `${page.fb_page_id}/video_reels`, token, finishParams));
+}
+
+async function cmdReels(page: PageAsset) {
+  out(await graphApi("GET", `${page.fb_page_id}/video_reels`, page.page_access_token));
+}
+
+async function cmdVideoStatus(page: PageAsset, videoId: string) {
+  out(await graphApi("GET", videoId, page.page_access_token, { fields: "status" }));
+}
+
+async function cmdVideoStory(page: PageAsset, source: string) {
+  const token = page.page_access_token;
+  const init = (await graphApi("POST", `${page.fb_page_id}/video_stories`, token, {
+    upload_phase: "start",
+  })) as Record<string, any>;
+  const videoId = init.video_id;
+
+  if (isUrl(source)) {
+    await ruploadApi(videoId, token, { file_url: source });
+  } else {
+    const { data, size } = await readLocalFile(source);
+    await ruploadApi(videoId, token, {
+      offset: "0",
+      file_size: String(size),
+    }, data);
+  }
+
+  out(await graphApi("POST", `${page.fb_page_id}/video_stories`, token, {
+    upload_phase: "finish",
+    video_id: videoId,
+  }));
+}
+
+async function cmdPhotoStory(page: PageAsset, photoUrl: string) {
+  const token = page.page_access_token;
+  const upload = (await graphApi("POST", `${page.fb_page_id}/photos`, token, {
+    url: photoUrl,
+    published: "false",
+  })) as Record<string, any>;
+  out(await graphApi("POST", `${page.fb_page_id}/photo_stories`, token, {
+    photo_id: upload.id,
+  }));
+}
+
+async function cmdStories(page: PageAsset) {
+  out(await graphApi("GET", `${page.fb_page_id}/stories`, page.page_access_token));
+}
+
+async function cmdSlideshow(page: PageAsset, imageUrls: string[], durationMs: number, transitionMs: number) {
+  out(await graphApi("POST", `${page.fb_page_id}/videos`, page.page_access_token, {
+    slideshow_spec: JSON.stringify({
+      images_urls: imageUrls,
+      duration_ms: durationMs,
+      transition_ms: transitionMs,
+    }),
+  }));
+}
+
+async function cmdPublishVideo(page: PageAsset, source: string, title?: string, description?: string) {
+  const token = page.page_access_token;
+  if (isUrl(source)) {
+    const params: Record<string, string> = { file_url: source };
+    if (title) params.title = title;
+    if (description) params.description = description;
+    out(await graphApi("POST", `${page.fb_page_id}/videos`, token, params));
+  } else {
+    const config = loadAppConfig();
+    if (!config.appId || !config.userToken) {
+      die("Local file upload requires FB_APP_ID and FB_USER_ACCESS_TOKEN in .env");
+    }
+    const { data, size, name } = await readLocalFile(source);
+    const handle = await resumableUpload(config.appId, config.userToken, data, name, size, "video/mp4");
+    const params: Record<string, string> = { file_url: handle };
+    if (title) params.title = title;
+    if (description) params.description = description;
+    out(await graphApi("POST", `${page.fb_page_id}/videos`, token, params));
+  }
+}
+
+async function cmdMusic(type: string, countries?: string) {
+  const assets = loadAssets();
+  if (assets.length === 0) die("No pages configured — need a token for music API");
+  const token = assets[0].page_access_token;
+  const params: Record<string, string> = { type };
+  if (countries) params.countries = countries;
+  out(await graphApi("GET", "audio/recommendations", token, params));
+}
+
+async function cmdCrosspost(page: PageAsset, videoId: string) {
+  out(await graphApi("POST", `${page.fb_page_id}/videos`, page.page_access_token, {
+    crossposted_video_id: videoId,
+  }));
+}
+
+async function cmdEnableCrosspost(page: PageAsset, videoId: string, targetPageIds: string[]) {
+  out(await graphApi("POST", videoId, page.page_access_token, undefined, {
+    allow_crossposting_for_pages: targetPageIds,
+  }));
+}
+
+async function cmdCrosspostPages(page: PageAsset) {
+  out(await graphApi("GET", `${page.fb_page_id}/crosspost_whitelisted_pages`, page.page_access_token));
+}
+
+async function cmdCrosspostCheck(page: PageAsset, videoId: string) {
+  out(await graphApi("GET", videoId, page.page_access_token, {
+    fields: "is_crossposting_eligible",
+  }));
+}
+
+async function cmdAbCreate(
+  page: PageAsset,
+  name: string,
+  goal: string,
+  experimentVideoIds: string[],
+  controlVideoId: string,
+  description?: string,
+  durationSeconds?: number,
+) {
+  const body: Record<string, unknown> = {
+    name,
+    experiment_video_ids: experimentVideoIds,
+    control_video_id: controlVideoId,
+    optimization_goal: goal,
+  };
+  if (description) body.description = description;
+  if (durationSeconds) body.duration_seconds = durationSeconds;
+  out(await graphApi("POST", `${page.fb_page_id}/ab_tests`, page.page_access_token, undefined, body));
+}
+
+async function cmdAbResults(page: PageAsset, testId: string) {
+  out(await graphApi("GET", testId, page.page_access_token));
+}
+
+async function cmdAbTests(page: PageAsset, since?: string, until?: string) {
+  const params: Record<string, string> = {};
+  if (since) params.since = since;
+  if (until) params.until = until;
+  out(await graphApi("GET", `${page.fb_page_id}/ab_tests`, page.page_access_token, params));
+}
+
+async function cmdAbDelete(page: PageAsset, testId: string) {
+  out(await graphApi("DELETE", testId, page.page_access_token));
+}
+
 // --- Help ---
 
 const HELP = `fbcli v${VERSION} — Facebook Page Management CLI
@@ -454,6 +701,35 @@ COMMANDS
 
   Messaging
     dm <page> <user_id> [message]        Send DM
+
+  Video
+    publish-reel <page> <url|file> [desc]  Publish Reel
+    reels <page>                           List Reels
+    video-status <page> <video_id>         Check processing status
+    publish-video <page> <url|file> [title]  Publish video to feed
+
+  Stories
+    video-story <page> <url|file>          Publish video Story
+    photo-story <page> <photo_url>         Publish photo Story
+    stories <page>                         List Stories
+
+  Slideshows
+    slideshow <page> <urls,...>             Create slideshow (3-7 images)
+
+  Music
+    music [--type popular|new|foryou]       Music recommendations
+
+  Crossposting
+    crosspost <page> <video_id>            Crosspost video to page
+    enable-crosspost <page> <vid> <pids>   Enable crossposting
+    crosspost-pages <page>                 List eligible pages
+    crosspost-check <page> <video_id>      Check eligibility
+
+  A/B Testing
+    ab-create <page> <name> <goal> <vids> <ctrl>  Create A/B test
+    ab-results <page> <test_id>            Get test results
+    ab-tests <page>                        List A/B tests
+    ab-delete <page> <test_id>             Delete A/B test
 
 STDIN SUPPORT
   Commands with [brackets] accept input via stdin when the argument is
@@ -561,6 +837,21 @@ async function main() {
   if (command === "pages") {
     const assets = loadAssets();
     return cmdPages(assets);
+  }
+
+  // Music is a global endpoint — no page required
+  if (command === "music") {
+    const typeMap: Record<string, string> = {
+      popular: "FACEBOOK_POPULAR_MUSIC",
+      new: "FACEBOOK_NEW_MUSIC",
+      foryou: "FACEBOOK_FOR_YOU",
+    };
+    const typeIdx = rest.indexOf("--type");
+    const typeArg = typeIdx !== -1 && rest[typeIdx + 1] ? rest[typeIdx + 1] : "popular";
+    const type = typeMap[typeArg] ?? typeArg;
+    const countryIdx = rest.indexOf("--country");
+    const countries = countryIdx !== -1 && rest[countryIdx + 1] ? rest[countryIdx + 1] : undefined;
+    return cmdMusic(type, countries);
   }
 
   // All other commands need a page
@@ -693,6 +984,106 @@ async function main() {
       );
       return cmdDm(getPage(assets, pageName), cmdArgs[0], msg);
     }
+
+    // Video
+    case "publish-reel": {
+      requireArgs(rest, 2, "publish-reel <page> <url|file> [description]");
+      const desc = cmdArgs.length > 1 ? cmdArgs.slice(1).join(" ") : undefined;
+      return cmdPublishReel(getPage(assets, pageName), cmdArgs[0], desc);
+    }
+    case "reels":
+      requireArgs(rest, 1, "reels <page>");
+      return cmdReels(getPage(assets, pageName));
+    case "video-status":
+      requireArgs(rest, 2, "video-status <page> <video_id>");
+      return cmdVideoStatus(getPage(assets, pageName), cmdArgs[0]);
+    case "publish-video": {
+      requireArgs(rest, 2, "publish-video <page> <url|file> [title]");
+      // Parse --description flag
+      const descIdx = cmdArgs.indexOf("--description");
+      let desc: string | undefined;
+      const filtered = [...cmdArgs];
+      if (descIdx !== -1 && descIdx + 1 < cmdArgs.length) {
+        desc = cmdArgs[descIdx + 1];
+        filtered.splice(descIdx, 2);
+      }
+      const title = filtered.length > 1 ? filtered.slice(1).join(" ") : undefined;
+      return cmdPublishVideo(getPage(assets, pageName), filtered[0], title, desc);
+    }
+
+    // Stories
+    case "video-story":
+      requireArgs(rest, 2, "video-story <page> <url|file>");
+      return cmdVideoStory(getPage(assets, pageName), cmdArgs[0]);
+    case "photo-story":
+      requireArgs(rest, 2, "photo-story <page> <photo_url>");
+      return cmdPhotoStory(getPage(assets, pageName), cmdArgs[0]);
+    case "stories":
+      requireArgs(rest, 1, "stories <page>");
+      return cmdStories(getPage(assets, pageName));
+
+    // Slideshows
+    case "slideshow": {
+      requireArgs(rest, 2, "slideshow <page> <url1,url2,url3,...>");
+      let urls: string[];
+      if (cmdArgs[0] === "-" || (!cmdArgs[0] && !process.stdin.isTTY)) {
+        const stdin = await readStdin();
+        if (!stdin) die("No image URLs provided via argument or stdin.");
+        urls = stdin.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+      } else {
+        urls = cmdArgs[0].split(",").map(s => s.trim()).filter(Boolean);
+      }
+      if (urls.length < 3 || urls.length > 7) die("Slideshow requires 3-7 image URLs.");
+      const durIdx = cmdArgs.indexOf("--duration");
+      const transIdx = cmdArgs.indexOf("--transition");
+      const duration = durIdx !== -1 && cmdArgs[durIdx + 1] ? parseInt(cmdArgs[durIdx + 1]) : 1750;
+      const transition = transIdx !== -1 && cmdArgs[transIdx + 1] ? parseInt(cmdArgs[transIdx + 1]) : 250;
+      return cmdSlideshow(getPage(assets, pageName), urls, duration, transition);
+    }
+
+    // Crossposting
+    case "crosspost":
+      requireArgs(rest, 2, "crosspost <page> <video_id>");
+      return cmdCrosspost(getPage(assets, pageName), cmdArgs[0]);
+    case "enable-crosspost": {
+      requireArgs(rest, 3, "enable-crosspost <page> <video_id> <page_ids,...>");
+      const targetIds = cmdArgs[1].split(",").map(s => s.trim()).filter(Boolean);
+      return cmdEnableCrosspost(getPage(assets, pageName), cmdArgs[0], targetIds);
+    }
+    case "crosspost-pages":
+      requireArgs(rest, 1, "crosspost-pages <page>");
+      return cmdCrosspostPages(getPage(assets, pageName));
+    case "crosspost-check":
+      requireArgs(rest, 2, "crosspost-check <page> <video_id>");
+      return cmdCrosspostCheck(getPage(assets, pageName), cmdArgs[0]);
+
+    // A/B Testing
+    case "ab-create": {
+      requireArgs(rest, 5, "ab-create <page> <name> <goal> <video_ids,...> <control_id>");
+      const name = cmdArgs[0];
+      const goal = cmdArgs[1];
+      const experimentIds = cmdArgs[2].split(",").map(s => s.trim()).filter(Boolean);
+      const controlId = cmdArgs[3];
+      const descIdx = cmdArgs.indexOf("--desc");
+      const desc = descIdx !== -1 && cmdArgs[descIdx + 1] ? cmdArgs[descIdx + 1] : undefined;
+      const durIdx = cmdArgs.indexOf("--duration");
+      const duration = durIdx !== -1 && cmdArgs[durIdx + 1] ? parseInt(cmdArgs[durIdx + 1]) : undefined;
+      return cmdAbCreate(getPage(assets, pageName), name, goal, experimentIds, controlId, desc, duration);
+    }
+    case "ab-results":
+      requireArgs(rest, 2, "ab-results <page> <test_id>");
+      return cmdAbResults(getPage(assets, pageName), cmdArgs[0]);
+    case "ab-tests": {
+      requireArgs(rest, 1, "ab-tests <page>");
+      const sinceIdx = cmdArgs.indexOf("--since");
+      const untilIdx = cmdArgs.indexOf("--until");
+      const since = sinceIdx !== -1 && cmdArgs[sinceIdx + 1] ? cmdArgs[sinceIdx + 1] : undefined;
+      const until = untilIdx !== -1 && cmdArgs[untilIdx + 1] ? cmdArgs[untilIdx + 1] : undefined;
+      return cmdAbTests(getPage(assets, pageName), since, until);
+    }
+    case "ab-delete":
+      requireArgs(rest, 2, "ab-delete <page> <test_id>");
+      return cmdAbDelete(getPage(assets, pageName), cmdArgs[0]);
 
     default:
       die(`Unknown command: ${command}. Run 'fbcli --help' for usage.`);

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A TypeScript MCP (Model Context Protocol) server for automating Facebook Page management via the Facebook Graph API. Exposes 30+ tools for posting, comment moderation, analytics, and engagement tracking to Claude Desktop and other LLM agents. Includes a standalone CLI for direct shell access.
+A TypeScript MCP (Model Context Protocol) server for automating Facebook Page management via the Facebook Graph API. Exposes 50+ tools for posting, comment moderation, analytics, engagement tracking, video/reels/stories publishing, crossposting, and A/B testing to Claude Desktop and other LLM agents. Includes a standalone CLI for direct shell access.
 
 ## Running the Server
 
@@ -39,6 +39,16 @@ Each entry requires:
 - `display_name` — human-readable label shown in `list_pages()` output
 - `page_access_token` — Page access token
 
+Optional env vars for local file uploads (video publishing):
+```
+FB_APP_ID=123456789
+FB_USER_ACCESS_TOKEN=EAA...
+```
+
+- `FB_APP_ID` — needed for Resumable Upload API (local file uploads)
+- `FB_USER_ACCESS_TOKEN` — needed for Resumable Upload API init/transfer steps
+- Both are optional — URL-based uploads work with existing page tokens only
+
 Credentials come from https://developers.facebook.com/tools/explorer. The Graph API version is hardcoded to `v22.0` in `src/config.ts`.
 
 ## Architecture
@@ -55,15 +65,27 @@ src/config.ts
 (env + types)
 ```
 
-**src/config.ts** — `PageAsset` interface, `GRAPH_API_BASE` constant, `loadAssets()` function that parses `FACEBOOK_ASSETS` from environment. Bun auto-loads `.env` from CWD.
+**src/config.ts** — `PageAsset` interface, `AppConfig` interface, `GRAPH_API_BASE` constant, `loadAssets()` for page config, `loadAppConfig()` for optional `FB_APP_ID`/`FB_USER_ACCESS_TOKEN`. Bun auto-loads `.env` from CWD.
 
-**src/api.ts** — `graphApi(method, endpoint, token, params?, body?)` function. Single point for all Graph API HTTP calls using native `fetch`. Returns `response.json()` directly. Also exports `graphApiBatch(token, requests[])` for batch API calls (auto-chunks at 50, Facebook's limit).
+**src/api.ts** — Three API wrappers:
+- `graphApi(method, endpoint, token, params?, body?)` — standard Graph API calls via `graph.facebook.com`
+- `ruploadApi(endpoint, token, headers?, body?)` — upload to `rupload.facebook.com` for Reels/Stories (uses `Authorization: OAuth` header)
+- `resumableUpload(appId, userToken, fileData, fileName, fileSize, fileType)` — 2-step Resumable Upload API for local file uploads (init session → transfer binary → returns file handle)
+- `graphApiBatch(token, requests[])` — batch API calls (auto-chunks at 50)
 
-**src/server.ts** — Registers all MCP tools via `McpServer.tool()` from `@modelcontextprotocol/sdk`. Builds a page registry from `loadAssets()`, keyed by `page_name`. Each tool resolves the page, calls `graphApi()`, and returns JSON content. Notable business logic:
-- `filter_negative_comments` — keyword-based sentiment filtering (7 hardcoded keywords)
-- `get_post_top_commenters` — manual counting/sorting of comment authors
-- `get_post_reactions_breakdown` — transforms raw insights API response into a flat dict
-- `bulk_delete_comments` / `bulk_hide_comments` — use batch API (`graphApiBatch`) for efficiency
+**src/server.ts** — Registers 53 MCP tools via `McpServer.tool()` from `@modelcontextprotocol/sdk`. Organized by section:
+- **Pages** — list_pages
+- **Posts** — CRUD, scheduling, image posting
+- **Comments** — CRUD, hide/unhide, bulk operations, sentiment filtering
+- **Analytics** — insights, impressions, reactions, engagement metrics
+- **Messaging** — send_dm_to_user
+- **Reels** — publish_reel (3-step upload), list_reels, get_video_status
+- **Stories** — publish_video_story (3-step), publish_photo_story (2-step), list_stories
+- **Slideshows** — create_slideshow (3-7 images)
+- **Video** — publish_video (URL or file handle)
+- **Music** — get_music_recommendations
+- **Crossposting** — crosspost_video, enable_crossposting, crosspost_eligible_pages, check_crosspost_eligibility
+- **A/B Testing** — create_ab_test, get_ab_test, list_ab_tests, delete_ab_test
 
 ### CLI (`cli/`)
 
@@ -88,8 +110,9 @@ Commands that accept text content (messages, captions) or ID lists support **std
 
 ## Conventions
 
-- All tool functions take `page_name: string` as the first parameter (except `list_pages`)
+- All tool functions take `page_name: string` as the first parameter (except `list_pages` and `get_music_recommendations`)
 - Tool descriptions follow a consistent `Input:/Output:` format for LLM consumption
-- The `graphApi()` function in `src/api.ts` is the single point for all HTTP calls
+- `graphApi()` handles standard Graph API calls; `ruploadApi()` handles rupload.facebook.com uploads; `resumableUpload()` handles local file uploads
 - No explicit error handling — Facebook API error responses pass through as-is
+- Multi-step video operations (reels, stories) fail at the step that errors — partial state is returned with video_id for retry
 - MCP tools return `{ content: [{ type: "text", text: JSON.stringify(data) }] }`

@@ -3,7 +3,7 @@
  * Single function for all Graph API calls — mirrors the Python FacebookAPI._request() pattern.
  */
 
-import { GRAPH_API_BASE } from "./config.js";
+import { GRAPH_API_BASE, GRAPH_API_VERSION } from "./config.js";
 
 export async function graphApi(
   method: string,
@@ -91,4 +91,69 @@ export async function graphApiBatch(
     }
   }
   return results;
+}
+
+// --- Rupload API (Reels & Stories) ---
+
+const RUPLOAD_BASE = `https://rupload.facebook.com/video-upload/${GRAPH_API_VERSION}`;
+
+/**
+ * Upload to rupload.facebook.com for Reels and Stories.
+ * Uses Authorization header (not query param) and supports binary body or file_url header.
+ */
+export async function ruploadApi(
+  endpoint: string,
+  token: string,
+  headers?: Record<string, string>,
+  body?: Uint8Array,
+): Promise<any> {
+  const url = endpoint.startsWith("http") ? endpoint : `${RUPLOAD_BASE}/${endpoint}`;
+  const hdrs: Record<string, string> = {
+    Authorization: `OAuth ${token}`,
+    ...headers,
+  };
+  const opts: RequestInit = { method: "POST", headers: hdrs };
+  if (body) {
+    opts.body = body;
+  }
+  const res = await fetch(url, opts);
+  return res.json();
+}
+
+// --- Resumable Upload API (generic video publishing with local files) ---
+
+/**
+ * Upload a local file via Facebook's Resumable Upload API.
+ * 2-step: init upload session → transfer binary.
+ * Returns the file handle string for use in publish calls.
+ */
+export async function resumableUpload(
+  appId: string,
+  userToken: string,
+  fileData: Uint8Array,
+  fileName: string,
+  fileSize: number,
+  fileType: string,
+): Promise<string> {
+  // Step 1: Init upload session
+  const initRes = await graphApi("POST", `${appId}/uploads`, userToken, {
+    file_name: fileName,
+    file_length: String(fileSize),
+    file_type: fileType,
+  });
+  const sessionId = initRes.id; // format: "upload:XXXX"
+
+  // Step 2: Transfer binary
+  const uploadUrl = `${GRAPH_API_BASE}/${sessionId}`;
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${userToken}`,
+      file_offset: "0",
+      "Content-Type": "application/octet-stream",
+    },
+    body: fileData,
+  });
+  const result = await res.json();
+  return result.h; // file handle
 }

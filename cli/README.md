@@ -88,6 +88,53 @@ fbcli comment-count <page> <post_id>     # Comment count
 fbcli dm <page> <user_id> [message]      # Send DM
 ```
 
+### Video & Reels
+
+```bash
+fbcli publish-reel <page> <url|file> [desc]  # Publish Reel (URL or local file)
+fbcli reels <page>                           # List Reels
+fbcli video-status <page> <video_id>         # Check processing status
+fbcli publish-video <page> <url|file> [title]  # Publish video to feed
+```
+
+### Stories
+
+```bash
+fbcli video-story <page> <url|file>          # Publish video Story
+fbcli photo-story <page> <photo_url>         # Publish photo Story
+fbcli stories <page>                         # List Stories
+```
+
+### Slideshows
+
+```bash
+fbcli slideshow <page> <url1,url2,url3,...>  # Create slideshow (3-7 images)
+```
+
+### Music
+
+```bash
+fbcli music [--type popular|new|foryou]      # Music recommendations
+```
+
+### Crossposting
+
+```bash
+fbcli crosspost <page> <video_id>            # Crosspost video to page
+fbcli enable-crosspost <page> <vid> <pids>   # Enable crossposting
+fbcli crosspost-pages <page>                 # List eligible pages
+fbcli crosspost-check <page> <video_id>      # Check eligibility
+```
+
+### A/B Testing
+
+```bash
+fbcli ab-create <page> <name> <goal> <vids> <ctrl>  # Create A/B test
+fbcli ab-results <page> <test_id>            # Get test results
+fbcli ab-tests <page>                        # List A/B tests
+fbcli ab-delete <page> <test_id>             # Delete A/B test
+```
+
 ## Stdin Support
 
 Commands with `[brackets]` accept input via stdin when the argument is omitted or replaced with `-`. This enables piping and composition:
@@ -137,7 +184,9 @@ Uses Facebook Graph API **v22.0**. Tokens from [developers.facebook.com/tools/ex
 
 Single-file CLI (`fbcli.ts`):
 - Config loader reads `FACEBOOK_ASSETS` from `.env` in the cli directory
-- `graphApi()` — single `fetch`-based wrapper for all HTTP calls
+- `graphApi()` — single `fetch`-based wrapper for all Graph API calls
+- `ruploadApi()` — upload wrapper for `rupload.facebook.com` (Reels/Stories)
+- `resumableUpload()` — 2-step Resumable Upload API for local file uploads
 - `graphApiBatch()` — batch API wrapper (auto-chunks at 50) for bulk operations
 - One async function per command
 - `switch` router in `main()` dispatches on argv

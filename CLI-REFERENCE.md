@@ -56,6 +56,47 @@ fb comment-count <page> <post_id>           → {comment_count: N}
 fb dm <page> <user_id> [message...]         → {recipient_id, message_id}
 ```
 
+### Video & Reels
+```
+fb publish-reel <page> <url|file> [desc]    → {success, video_id}  # 3-step: init → upload → publish
+fb reels <page>                             → {data: [{id, ...}]}
+fb video-status <page> <video_id>           → {status: {...}}
+fb publish-video <page> <url|file> [title]  → {id}  # --description "..." for description
+```
+
+### Stories
+```
+fb video-story <page> <url|file>            → {success, ...}  # 3-step upload
+fb photo-story <page> <photo_url>           → {success, ...}  # 2-step: upload unpublished → publish
+fb stories <page>                           → {data: [{id, ...}]}
+```
+
+### Slideshows
+```
+fb slideshow <page> <url1,url2,...>          → {id}  # 3-7 images, --duration 1750, --transition 250
+```
+
+### Music
+```
+fb music [--type popular|new|foryou] [--country US,UK]  → {data: [{id, title, ...}]}
+```
+
+### Crossposting
+```
+fb crosspost <page> <video_id>              → {id}
+fb enable-crosspost <page> <vid> <pids,...> → {success: true}
+fb crosspost-pages <page>                   → {data: [{id, name, ...}]}
+fb crosspost-check <page> <video_id>        → {is_crossposting_eligible: bool}
+```
+
+### A/B Testing
+```
+fb ab-create <page> <name> <goal> <vids,...> <ctrl>  → {id}  # --desc "..." --duration 3600
+fb ab-results <page> <test_id>              → {id, name, status, ...}
+fb ab-tests <page>                          → {data: [{id, name, ...}]}  # --since DATE --until DATE
+fb ab-delete <page> <test_id>               → {success: true}
+```
+
 ## Stdin Support
 
 Commands with `[brackets]` read from stdin when the arg is omitted or `-`:
@@ -88,6 +129,11 @@ fb comments mypage POST_ID | jq '.data[] | select(.message | test("spam";"i")) |
 
 ## Config
 
-`.env` in cli/ dir: `FACEBOOK_ASSETS='[{"fb_page_id":"...","page_name":"...","display_name":"...","page_access_token":"..."}]'`
+`.env` in cli/ dir:
+```
+FACEBOOK_ASSETS='[{"fb_page_id":"...","page_name":"...","display_name":"...","page_access_token":"..."}]'
+FB_APP_ID=123456789                    # optional — needed for local file uploads
+FB_USER_ACCESS_TOKEN=EAA...            # optional — needed for local file uploads
+```
 
 Graph API: v22.0

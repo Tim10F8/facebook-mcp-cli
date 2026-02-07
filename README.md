@@ -2,7 +2,7 @@
 
 > **Inspired by [HagaiHen/facebook-mcp-server](https://github.com/HagaiHen/facebook-mcp-server)** — rewritten in TypeScript with **multi-page management** via a `FACEBOOK_ASSETS` JSON configuration. Source: [2b3pro/facebook-mcp-cli](https://github.com/2b3pro/facebook-mcp-cli)
 
-A **TypeScript MCP server** for automating and managing interactions on Facebook Pages using the Facebook Graph API. Exposes 36 tools for posting, comment moderation, analytics, and engagement tracking — ready to plug into Claude Desktop or other LLM-based agents. Includes a standalone CLI for direct shell access.
+A **TypeScript MCP server** for automating and managing interactions on Facebook Pages using the Facebook Graph API. Exposes 53 tools for posting, comment moderation, analytics, engagement tracking, video/reels/stories publishing, slideshows, crossposting, and A/B testing — ready to plug into Claude Desktop or other LLM-based agents. Includes a standalone CLI for direct shell access.
 
 ---
 
@@ -61,6 +61,29 @@ All tools (except `list_pages`) take `page_name` as the first parameter — a sl
 | `get_post_reactions_breakdown`   | Get all reaction counts for a post in one call.                     |
 | `bulk_delete_comments`           | Delete multiple comments by ID.                                     |
 | `bulk_hide_comments`             | Hide multiple comments by ID.                                       |
+| **Video & Reels**                |                                                                     |
+| `publish_reel`                   | Upload and publish a Reel (3-step upload flow).                     |
+| `list_reels`                     | List published Reels on the Page.                                   |
+| `get_video_status`               | Check video processing status after upload.                         |
+| `publish_video`                  | Publish a video to the Page feed.                                   |
+| **Stories**                      |                                                                     |
+| `publish_video_story`            | Publish a video Story (3-step upload flow).                         |
+| `publish_photo_story`            | Publish a photo Story (2-step upload flow).                         |
+| `list_stories`                   | List Page Stories.                                                  |
+| **Slideshows**                   |                                                                     |
+| `create_slideshow`               | Create slideshow video from 3-7 images.                             |
+| **Music**                        |                                                                     |
+| `get_music_recommendations`      | Get music recommendations for videos/reels.                         |
+| **Crossposting**                 |                                                                     |
+| `crosspost_video`                | Crosspost a video to another Page.                                  |
+| `enable_crossposting`            | Enable video crossposting to specific Pages.                        |
+| `crosspost_eligible_pages`       | List Pages eligible for crossposting.                               |
+| `check_crosspost_eligibility`    | Check if a video can be crossposted.                                |
+| **A/B Testing**                  |                                                                     |
+| `create_ab_test`                 | Create A/B test for video variants.                                 |
+| `get_ab_test`                    | Get A/B test results.                                               |
+| `list_ab_tests`                  | List all A/B tests on the Page.                                     |
+| `delete_ab_test`                 | Delete an A/B test.                                                 |
 
 ---
 
@@ -155,8 +178,8 @@ src/config.ts
 ```
 
 - **src/config.ts** — `PageAsset` interface, env loading, API base URL
-- **src/api.ts** — `graphApi()` single-function HTTP wrapper using native `fetch`
-- **src/server.ts** — All 36 MCP tools via `@modelcontextprotocol/sdk`
+- **src/api.ts** — `graphApi()`, `ruploadApi()`, `resumableUpload()`, `graphApiBatch()` HTTP wrappers
+- **src/server.ts** — All 53 MCP tools via `@modelcontextprotocol/sdk`
 
 ### CLI (`cli/`)
 

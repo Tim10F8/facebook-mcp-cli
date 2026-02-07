@@ -21,3 +21,15 @@ export function loadAssets(): PageAsset[] {
     throw new Error("FACEBOOK_ASSETS is not valid JSON");
   }
 }
+
+export interface AppConfig {
+  appId?: string;
+  userToken?: string;
+}
+
+export function loadAppConfig(): AppConfig {
+  return {
+    appId: process.env.FB_APP_ID,
+    userToken: process.env.FB_USER_ACCESS_TOKEN,
+  };
+}
