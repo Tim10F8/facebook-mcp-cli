@@ -8,7 +8,7 @@
 import { readFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const GRAPH_API_BASE = "https://graph.facebook.com/v22.0";
 const SCRIPT_DIR = dirname(Bun.main);
 const ENV_PATH = join(SCRIPT_DIR, ".env");
@@ -70,6 +70,66 @@ async function graphApi(
   }
   const res = await fetch(url.toString(), opts);
   return res.json();
+}
+
+// --- Batch API ---
+
+const BATCH_LIMIT = 50;
+
+interface BatchRequest {
+  method: string;
+  relative_url: string;
+  body?: Record<string, string>;
+}
+
+interface BatchResponse {
+  code: number;
+  body: any;
+}
+
+async function graphApiBatch(
+  token: string,
+  requests: BatchRequest[]
+): Promise<BatchResponse[]> {
+  if (requests.length === 0) return [];
+
+  const results: BatchResponse[] = [];
+  for (let i = 0; i < requests.length; i += BATCH_LIMIT) {
+    const chunk = requests.slice(i, i + BATCH_LIMIT);
+    const batch = chunk.map((r) => {
+      const item: Record<string, string> = {
+        method: r.method,
+        relative_url: r.relative_url,
+      };
+      if (r.body) {
+        item.body = new URLSearchParams(r.body).toString();
+      }
+      return item;
+    });
+
+    const url = new URL(GRAPH_API_BASE);
+    url.searchParams.set("access_token", token);
+    url.searchParams.set("include_headers", "false");
+    url.searchParams.set("batch", JSON.stringify(batch));
+
+    const res = await fetch(url.toString(), { method: "POST" });
+    const raw: Array<{ code: number; body: string } | null> = await res.json();
+
+    for (const item of raw) {
+      if (item === null) {
+        results.push({ code: 0, body: { error: "Request timed out in batch" } });
+      } else {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(item.body);
+        } catch {
+          parsed = item.body;
+        }
+        results.push({ code: item.code, body: parsed });
+      }
+    }
+  }
+  return results;
 }
 
 // --- Helpers ---
@@ -193,25 +253,36 @@ async function cmdUnhideComment(page: PageAsset, commentId: string) {
 }
 
 async function cmdBulkDelete(page: PageAsset, ids: string) {
-  const commentIds = ids.split(",");
-  const results = [];
-  for (const cid of commentIds) {
-    const result = await graphApi("DELETE", cid.trim(), page.page_access_token);
-    results.push({ comment_id: cid.trim(), result });
-  }
-  out(results);
+  const commentIds = ids.split(",").map((s) => s.trim()).filter(Boolean);
+  const requests = commentIds.map((cid) => ({
+    method: "DELETE",
+    relative_url: cid,
+  }));
+  const responses = await graphApiBatch(page.page_access_token, requests);
+  out(
+    commentIds.map((cid, i) => ({
+      comment_id: cid,
+      result: responses[i].body,
+      success: responses[i].code === 200,
+    })),
+  );
 }
 
 async function cmdBulkHide(page: PageAsset, ids: string) {
-  const commentIds = ids.split(",");
-  const results = [];
-  for (const cid of commentIds) {
-    const result = await graphApi("POST", cid.trim(), page.page_access_token, {
-      is_hidden: "true",
-    });
-    results.push({ comment_id: cid.trim(), result });
-  }
-  out(results);
+  const commentIds = ids.split(",").map((s) => s.trim()).filter(Boolean);
+  const requests = commentIds.map((cid) => ({
+    method: "POST",
+    relative_url: cid,
+    body: { is_hidden: "true" },
+  }));
+  const responses = await graphApiBatch(page.page_access_token, requests);
+  out(
+    commentIds.map((cid, i) => ({
+      comment_id: cid,
+      result: responses[i].body,
+      success: responses[i].code === 200,
+    })),
+  );
 }
 
 async function cmdInsights(page: PageAsset, postId: string) {

@@ -57,13 +57,13 @@ src/config.ts
 
 **src/config.ts** — `PageAsset` interface, `GRAPH_API_BASE` constant, `loadAssets()` function that parses `FACEBOOK_ASSETS` from environment. Bun auto-loads `.env` from CWD.
 
-**src/api.ts** — `graphApi(method, endpoint, token, params?, body?)` function. Single point for all Graph API HTTP calls using native `fetch`. Returns `response.json()` directly.
+**src/api.ts** — `graphApi(method, endpoint, token, params?, body?)` function. Single point for all Graph API HTTP calls using native `fetch`. Returns `response.json()` directly. Also exports `graphApiBatch(token, requests[])` for batch API calls (auto-chunks at 50, Facebook's limit).
 
 **src/server.ts** — Registers all MCP tools via `McpServer.tool()` from `@modelcontextprotocol/sdk`. Builds a page registry from `loadAssets()`, keyed by `page_name`. Each tool resolves the page, calls `graphApi()`, and returns JSON content. Notable business logic:
 - `filter_negative_comments` — keyword-based sentiment filtering (7 hardcoded keywords)
 - `get_post_top_commenters` — manual counting/sorting of comment authors
 - `get_post_reactions_breakdown` — transforms raw insights API response into a flat dict
-- `bulk_delete_comments` / `bulk_hide_comments` — sequential loops over individual API calls
+- `bulk_delete_comments` / `bulk_hide_comments` — use batch API (`graphApiBatch`) for efficiency
 
 ### CLI (`cli/`)
 

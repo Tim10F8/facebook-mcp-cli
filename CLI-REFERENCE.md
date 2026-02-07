@@ -32,8 +32,8 @@ fb reply <page> <comment_id> [msg...]       → {id}
 fb delete-comment <page> <comment_id>       → {success: true}
 fb hide-comment <page> <comment_id>         → {success: true}
 fb unhide-comment <page> <comment_id>       → {success: true}
-fb bulk-delete <page> [id1,id2,...]         → [{comment_id, result}]  # comma-sep or stdin (newline-sep)
-fb bulk-hide <page> [id1,id2,...]           → [{comment_id, result}]
+fb bulk-delete <page> [id1,id2,...]         → [{comment_id, result, success}]  # uses batch API (max 50/req)
+fb bulk-hide <page> [id1,id2,...]           → [{comment_id, result, success}]
 ```
 
 ### Analytics

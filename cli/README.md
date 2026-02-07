@@ -62,8 +62,8 @@ fbcli reply <page> <comment_id> [msg]    # Reply to comment
 fbcli delete-comment <page> <comment_id> # Delete comment
 fbcli hide-comment <page> <comment_id>   # Hide comment
 fbcli unhide-comment <page> <comment_id> # Unhide comment
-fbcli bulk-delete <page> [id1,id2,...]   # Bulk delete (comma-sep or stdin)
-fbcli bulk-hide <page> [id1,id2,...]     # Bulk hide (comma-sep or stdin)
+fbcli bulk-delete <page> [id1,id2,...]   # Bulk delete (batch API, max 50/req)
+fbcli bulk-hide <page> [id1,id2,...]     # Bulk hide (batch API, max 50/req)
 ```
 
 ### Analytics
@@ -138,6 +138,7 @@ Uses Facebook Graph API **v22.0**. Tokens from [developers.facebook.com/tools/ex
 Single-file CLI (`fbcli.ts`):
 - Config loader reads `FACEBOOK_ASSETS` from `.env` in the cli directory
 - `graphApi()` — single `fetch`-based wrapper for all HTTP calls
+- `graphApiBatch()` — batch API wrapper (auto-chunks at 50) for bulk operations
 - One async function per command
 - `switch` router in `main()` dispatches on argv
 - JSON output to stdout, errors to stderr

@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadAssets, type PageAsset } from "./config.js";
-import { graphApi } from "./api.js";
+import { graphApi, graphApiBatch } from "./api.js";
 
 // --- Page registry ---
 
@@ -71,7 +71,7 @@ async function getInsight(pageName: string, postId: string, metric: string) {
 
 // --- Server ---
 
-const server = new McpServer({ name: "FacebookMCP", version: "2.0.0" });
+const server = new McpServer({ name: "FacebookMCP", version: "2.1.0" });
 
 // ── Pages ───────────────────────────────────────────────────────────────
 
@@ -250,31 +250,44 @@ server.tool(
 
 server.tool(
   "bulk_delete_comments",
-  "Delete multiple comments by ID.\nInput: page_name (str), comment_ids (list[str])\nOutput: list of deletion results",
+  "Delete multiple comments by ID using batch API.\nInput: page_name (str), comment_ids (list[str])\nOutput: list of deletion results",
   { page_name: z.string(), comment_ids: z.array(z.string()) },
   async ({ page_name, comment_ids }) => {
     const p = getPage(page_name);
-    const results = [];
-    for (const cid of comment_ids) {
-      const result = await graphApi("DELETE", cid, p.page_access_token);
-      results.push({ comment_id: cid, result });
-    }
-    return json(results);
+    const requests = comment_ids.map((cid) => ({
+      method: "DELETE",
+      relative_url: cid,
+    }));
+    const responses = await graphApiBatch(p.page_access_token, requests);
+    return json(
+      comment_ids.map((cid, i) => ({
+        comment_id: cid,
+        result: responses[i].body,
+        success: responses[i].code === 200,
+      })),
+    );
   },
 );
 
 server.tool(
   "bulk_hide_comments",
-  "Hide multiple comments by ID.\nInput: page_name (str), comment_ids (list[str])\nOutput: list of hide results",
+  "Hide multiple comments by ID using batch API.\nInput: page_name (str), comment_ids (list[str])\nOutput: list of hide results",
   { page_name: z.string(), comment_ids: z.array(z.string()) },
   async ({ page_name, comment_ids }) => {
     const p = getPage(page_name);
-    const results = [];
-    for (const cid of comment_ids) {
-      const result = await graphApi("POST", cid, p.page_access_token, { is_hidden: "true" });
-      results.push({ comment_id: cid, result });
-    }
-    return json(results);
+    const requests = comment_ids.map((cid) => ({
+      method: "POST",
+      relative_url: cid,
+      body: { is_hidden: "true" },
+    }));
+    const responses = await graphApiBatch(p.page_access_token, requests);
+    return json(
+      comment_ids.map((cid, i) => ({
+        comment_id: cid,
+        result: responses[i].body,
+        success: responses[i].code === 200,
+      })),
+    );
   },
 );
 
